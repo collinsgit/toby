@@ -3,6 +3,7 @@ import random
 
 class Player(object):
     def __init__(self, money=0):
+        self.hand = []
         self.money = money
 
     def add_money(self, money):
@@ -15,6 +16,9 @@ class Player(object):
 
     def choose_move(self, moves):
         return random.choice(moves)
+
+    def set_hand(self, hand):
+        self.hand = hand
 
 
 class ManualPlayer(Player):
