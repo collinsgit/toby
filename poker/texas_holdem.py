@@ -11,7 +11,4 @@ class TexasHoldem(object):
     def begin(self):
         self.deck.shuffle()
         for player in self.players:
-            player.set_hand([self.deck.deal(), self.deck.deal()])
-
-
-
+            player.set_pocket([self.deck.deal(), self.deck.deal()])
