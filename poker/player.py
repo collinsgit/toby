@@ -2,7 +2,8 @@ import random
 
 
 class Player(object):
-    def __init__(self, money=0):
+    def __init__(self, name='Player', money=0):
+        self.name = name
         self.pocket = []
         self.money = money
 
@@ -15,14 +16,29 @@ class Player(object):
         self.money -= money
 
     def choose_move(self, moves):
-        return random.choice(moves)
+        move = random.choice(moves.keys())
+        return move, moves[move][0]
 
-    def set_hand(self, pocket):
+    def set_pocket(self, pocket):
         self.pocket = pocket
 
 
 class ManualPlayer(Player):
     def choose_move(self, moves):
-        for i, move in enumerate(moves):
-            print('{}: {}'.format(i, move))
-        return moves[int(input('Select a move:'))]
+        print(self.pocket)
+        for move in moves:
+            print('{}: {}'.format(move, moves[move]))
+
+        response = input('Select a move: ').split()
+        response = (response, 0) if len(response) == 1 else response
+
+        return response[0], int(response[1])
+
+
+class RandomPlayer(Player):
+    def choose_move(self, moves):
+        move = random.choice(list(moves.keys()))
+        value = random.randint(*moves[move])
+
+        print('{}: {} {}'.format(self.name, move, value))
+        return move, value
