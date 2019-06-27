@@ -1,9 +1,13 @@
 import random
 from functools import cmp_to_key
+from threading import Lock
+
 from poker.cards import StandardDeck
 from poker.player import ManualPlayer, RandomPlayer
 
+
 VALUES = {'J': 11, 'Q': 12, 'K': 13, 'A': 14}
+
 
 class TexasHoldem(object):
     def __init__(self, players):
@@ -16,19 +20,25 @@ class TexasHoldem(object):
         self.small_blind_val = 5
         self.big_blind_val = 10
 
+        self.in_hand = Lock()
+
+    def add_player(self, player):
+        with self.in_hand:
+            self.players.append(player)
+
     def begin(self):
         self.deck.shuffle()
         for player in self.players:
             player.set_pocket([self.deck.deal(), self.deck.deal()])
 
     def get_winner(self, folded):
-        players = []
+        current_players = []
         for i in range(len(self.players)):
             if i not in folded:
-                players.append(self.players[i])
+                current_players.append(self.players[i])
 
         player_hands = []
-        for player in players:
+        for player in current_players:
             hands = power_sets(player.pocket + self.community)
             hands = [eval_hand(hand) for hand in hands]
             hands.sort(key=cmp_to_key(hand_cmp))
@@ -41,152 +51,153 @@ class TexasHoldem(object):
         return list(map(lambda x: x[0], filter(lambda x: x[1] == winning_hand, player_hands)))
 
     def hand(self):
-        # keep track of the current turn, folded players, and pot contributions
-        turn = (self.dealer - 3) % len(self.players)
-        contributions = {player: 0 for player in self.players}
-        folded = set()
-
-        # deal pocket cards
-        self.begin()
-
-        # take blinds
-        small_blind = self.players[(self.dealer - 1) % len(self.players)]
-        big_blind = self.players[(self.dealer - 2) % len(self.players)]
-
-        small_blind_val = min(self.small_blind_val, small_blind.money)
-        big_blind_val = min(self.big_blind_val, big_blind.money)
-
-        small_blind.sub_money(small_blind_val)
-        big_blind.sub_money(big_blind_val)
-        self.pot += small_blind_val + big_blind_val
-        contributions[small_blind] += small_blind_val
-        contributions[big_blind] += big_blind_val
-
-        # first betting round
-        stake = max(small_blind_val, big_blind_val)
-        last_raised = (self.dealer - 2) % len(self.players), stake
-        big_turn = True
-        all_in = False
-
-        while turn != last_raised[0] or big_turn:
-            if turn not in folded:
-                player = self.players[turn]
-                options = {'fold': (0, 0),
-                           'call': (min(stake-contributions[player], player.money), min(stake-contributions[player], player.money))
-                           }
-                if not all_in and player.money >= stake-contributions[player]+max(1, last_raised[1]):
-                    options['raise'] = (stake-contributions[player]+max(1, last_raised[1]), player.money)
-
-                move = player.choose_move(options)
-
-                if move[0] == 'fold':
-                    folded.add(turn)
-                elif move[0] == 'call' or move[0] == 'raise':
-                    assert move[0] in options and options[move[0]][0] <= move[1] <= options[move[0]][1]
-                    player.sub_money(move[1])
-                    self.pot += move[1]
-                    contributions[player] += move[1]
-
-                    if move[0] == 'raise':
-                        last_raised = turn, contributions[player] - stake
-                        stake = contributions[player]
-
-                        if move[1] == options[move[0]][1]:
-                            all_in = True
-
-                if self.players[turn] == big_blind and big_turn:
-                    big_turn = False
-
-                    if turn == last_raised and move[0] != 'raise':
-                        break
-
-            turn = (turn - 1) % len(self.players)
-
-        # burn a card
-        self.deck.deal()
-
-        # deal 3 cards
-        for _ in range(3):
-            self.community.append(self.deck.deal())
-
-        print(self.community)
-
-        # second betting round
-        def betting():
+        with self.in_hand:
+            # keep track of the current turn, folded players, and pot contributions
+            turn = (self.dealer - 3) % len(self.players)
             contributions = {player: 0 for player in self.players}
-            turn = (self.dealer - 1) % len(self.players)
-            stake = 0
-            last_raised = turn, 0
-            first_turn = True
+            folded = set()
+
+            # deal pocket cards
+            self.begin()
+
+            # take blinds
+            small_blind = self.players[(self.dealer - 1) % len(self.players)]
+            big_blind = self.players[(self.dealer - 2) % len(self.players)]
+
+            small_blind_val = min(self.small_blind_val, small_blind.money)
+            big_blind_val = min(self.big_blind_val, big_blind.money)
+
+            small_blind.sub_money(small_blind_val)
+            big_blind.sub_money(big_blind_val)
+            self.pot += small_blind_val + big_blind_val
+            contributions[small_blind] += small_blind_val
+            contributions[big_blind] += big_blind_val
+
+            # first betting round
+            stake = max(small_blind_val, big_blind_val)
+            last_raised = (self.dealer - 2) % len(self.players), stake
+            big_turn = True
             all_in = False
 
-            while turn != last_raised[0] or first_turn:
-                if first_turn:
-                    first_turn = False
-
+            while turn != last_raised[0] or big_turn:
                 if turn not in folded:
                     player = self.players[turn]
-                    if not stake:
-                        options = {'check': (0, 0),
-                                   'bet': (min(1, player.money), player.money)}
-                    else:
-                        options = {'fold': (0, 0),
-                                   'call': (min(stake-contributions[player], player.money), min(stake-contributions[player], player.money))}
-                        if not all_in and player.money >= stake - contributions[player] + max(1, last_raised[1]):
-                            options['raise'] = (stake - contributions[player] + max(1, last_raised[1]), player.money)
+                    options = {'fold': (0, 0),
+                               'call': (min(stake-contributions[player], player.money), min(stake-contributions[player], player.money))
+                               }
+                    if not all_in and player.money >= stake-contributions[player]+max(1, last_raised[1]):
+                        options['raise'] = (stake-contributions[player]+max(1, last_raised[1]), player.money)
 
                     move = player.choose_move(options)
 
                     if move[0] == 'fold':
                         folded.add(turn)
-                    elif move[0] in ('call', 'raise', 'bet'):
+                    elif move[0] == 'call' or move[0] == 'raise':
                         assert move[0] in options and options[move[0]][0] <= move[1] <= options[move[0]][1]
                         player.sub_money(move[1])
                         self.pot += move[1]
                         contributions[player] += move[1]
 
-                        if move[0] == 'raise' or move[0] == 'bet':
+                        if move[0] == 'raise':
                             last_raised = turn, contributions[player] - stake
                             stake = contributions[player]
 
                             if move[1] == options[move[0]][1]:
                                 all_in = True
 
+                    if self.players[turn] == big_blind and big_turn:
+                        big_turn = False
+
+                        if turn == last_raised and move[0] != 'raise':
+                            break
+
                 turn = (turn - 1) % len(self.players)
 
-        betting()
+            # burn a card
+            self.deck.deal()
 
-        # burn a card
-        self.deck.deal()
+            # deal 3 cards
+            for _ in range(3):
+                self.community.append(self.deck.deal())
 
-        # deal a card
-        self.community.append(self.deck.deal())
-        print(self.community)
+            print(self.community)
 
-        # third betting round
-        betting()
+            # second betting round
+            def betting():
+                contributions = {player: 0 for player in self.players}
+                turn = (self.dealer - 1) % len(self.players)
+                stake = 0
+                last_raised = turn, 0
+                first_turn = True
+                all_in = False
 
-        # burn a card
-        self.deck.deal()
+                while turn != last_raised[0] or first_turn:
+                    if first_turn:
+                        first_turn = False
 
-        # deal a card
-        self.community.append(self.deck.deal())
-        print(self.community)
+                    if turn not in folded:
+                        player = self.players[turn]
+                        if not stake:
+                            options = {'check': (0, 0),
+                                       'bet': (min(1, player.money), player.money)}
+                        else:
+                            options = {'fold': (0, 0),
+                                       'call': (min(stake-contributions[player], player.money), min(stake-contributions[player], player.money))}
+                            if not all_in and player.money >= stake - contributions[player] + max(1, last_raised[1]):
+                                options['raise'] = (stake - contributions[player] + max(1, last_raised[1]), player.money)
 
-        # final betting round
-        betting()
+                        move = player.choose_move(options)
 
-        # give up the pot
-        winners = self.get_winner(folded)
-        prize = self.pot // len(winners)
-        for player in winners:
-            player.add_money(prize)
-        self.pot = 0
-        print('The winners are {} and they won {}'.format(winners, prize))
+                        if move[0] == 'fold':
+                            folded.add(turn)
+                        elif move[0] in ('call', 'raise', 'bet'):
+                            assert move[0] in options and options[move[0]][0] <= move[1] <= options[move[0]][1]
+                            player.sub_money(move[1])
+                            self.pot += move[1]
+                            contributions[player] += move[1]
 
-        self.deck.reset()
+                            if move[0] == 'raise' or move[0] == 'bet':
+                                last_raised = turn, contributions[player] - stake
+                                stake = contributions[player]
 
-        self.dealer = (self.dealer - 1) % len(self.players)
+                                if move[1] == options[move[0]][1]:
+                                    all_in = True
+
+                    turn = (turn - 1) % len(self.players)
+
+            betting()
+
+            # burn a card
+            self.deck.deal()
+
+            # deal a card
+            self.community.append(self.deck.deal())
+            print(self.community)
+
+            # third betting round
+            betting()
+
+            # burn a card
+            self.deck.deal()
+
+            # deal a card
+            self.community.append(self.deck.deal())
+            print(self.community)
+
+            # final betting round
+            betting()
+
+            # give up the pot
+            winners = self.get_winner(folded)
+            prize = self.pot // len(winners)
+            for player in winners:
+                player.add_money(prize)
+            self.pot = 0
+            print('The winners are {} and they won {}'.format(winners, prize))
+
+            self.deck.reset()
+
+            self.dealer = (self.dealer - 1) % len(self.players)
 
 
 def power_sets(cards):
